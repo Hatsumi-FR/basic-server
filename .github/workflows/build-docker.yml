@@ -69,3 +69,56 @@ jobs:
       - name: Run API tests
         run: |
           postman collection run "9178410-6f8bab6c-f595-4b3b-9012-c60e3b7ea416"
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build-test-deploy
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Copy code to OVH VM
+        uses: appleboy/scp-action@v0.1.4
+        with:
+          host: ${{ secrets.OVH_VM_HOST }}
+          username: ${{ secrets.OVH_VM_USER }}
+          key: ${{ secrets.OVH_SSH_KEY }}
+          source: "."
+          target: "/home/${{ secrets.OVH_VM_USER }}/app"
+
+      - name: SSH into OVH VM and deploy
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.OVH_VM_HOST }}
+          username: ${{ secrets.OVH_VM_USER }}
+          key: ${{ secrets.OVH_SSH_KEY }}
+          script: |
+            set -e
+
+            # Install Docker if not present
+            if ! command -v docker &> /dev/null; then
+              echo "Docker not found. Installing..."
+              sudo apt-get update
+              sudo apt-get install -y docker.io
+              sudo usermod -aG docker $USER
+            else
+              echo "✅ Docker is already installed."
+            fi
+
+            # Install Docker Compose if not present
+            if ! command -v docker-compose &> /dev/null; then
+              echo "Docker Compose not found. Installing..."
+              sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" \
+                -o /usr/local/bin/docker-compose
+              sudo chmod +x /usr/local/bin/docker-compose
+              sudo ln -s /usr/local/bin/docker-compose /usr/bin/docker-compose || true
+            else
+              echo "✅ Docker Compose is already installed."
+            fi
+
+            # Déploiement sur OVH
+            cd /home/${{ secrets.OVH_VM_USER }}/app
+
+            docker-compose down || true
+            docker-compose up -d --build
